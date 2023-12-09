@@ -9,6 +9,10 @@ const form = document.querySelector('.search-form');
 const gallery = document.querySelector('.gallery');
 const galleryLightBox = new SimpleLightbox('.gallery a');
 
+let observer;
+let currentImages = []; // Массив текущих изображений в галерее
+let currentObserveElem;
+
 let query;
 let per_page = 40;
 let nextPage = 1;
@@ -23,17 +27,55 @@ Notify.init({
   timeout: 3000,
 });
 
+// =========== Observer ===========
+function setupObserver() {
+  let options = {
+    root: null, // область просмотра - весь вьюпорт
+    rootMargin: '0px',
+    threshold: 1,
+  };
+
+  observer = new IntersectionObserver((entries, observer) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        getData(query, nextPage);
+      }
+    });
+  }, options);
+}
+
+function updateObserver() {
+  if (currentImages.length > 0) {
+    // Отмена наблюдения за старым элементом
+    unObserve(currentObserveElem);
+  }
+
+  currentImages = document.querySelectorAll('.gallery img'); // Обновление списка изображений
+  let targetIndex = Math.floor(currentImages.length * 0.75); // 75% от текущего количества изображений
+  currentObserveElem = currentImages[targetIndex];
+  observer.observe(currentObserveElem); // Начало наблюдения за новым элементом
+}
+
+function unObserve(elem) {
+  observer.unobserve(elem);
+}
+
+setupObserver();
+// ============ end of Observer =============
+
 const onSubmitForm = async e => {
   e.preventDefault();
 
-  shouldLoad = true;
-  nextPage = 1;
   gallery.innerHTML = '';
 
   query = e.target.elements.searchQuery.value;
   if (!query) {
     Notify.failure('Please, enter search text');
   } else {
+    shouldLoad = true;
+    nextPage = 1;
+    currentImages = [];
+
     getData(query, 1);
   }
 };
@@ -53,72 +95,33 @@ async function getData(query, page) {
         'Sorry, there are no images matching your search query. Please try again.'
       );
     } else {
-      if (page === 1) {
-        maxPages = data.totalHits / per_page;
-        Notify.success(`Hooray! We found ${data.totalHits} images`);
-      }
       const markup = createMarkup(data.hits);
-      // console.log(markup);
-      // gallery.innerHTML = markup;
       gallery.insertAdjacentHTML('beforeend', markup);
 
       galleryLightBox.refresh();
+
+      updateObserver();
+
+      if (page === 1) {
+        maxPages = Math.ceil(data.totalHits / per_page);
+        Notify.success(`Hooray! We found ${data.totalHits} images`);
+      }
+    }
+
+    nextPage++;
+
+    // Если мы увидели, что контент закончился,
+    // отмечаем, что больше запрашивать ничего не надо:
+    if (nextPage > maxPages) {
+      shouldLoad = false;
+      unObserve(currentObserveElem);
     }
   } else {
     Notify.failure('Error connection...');
   }
-
-  nextPage++;
-
-  // Если мы увидели, что контент закончился,
-  // отмечаем, что больше запрашивать ничего не надо:
-  if (nextPage > maxPages) shouldLoad = false;
-
   // Когда запрос выполнен и обработан,
   // снимаем флаг isLoading:
   isLoading = false;
 }
-
-function checkPosition() {
-  // Нам потребуется знать высоту документа и высоту экрана:
-  const height = document.body.offsetHeight;
-  const screenHeight = window.innerHeight;
-
-  // Записываем, сколько пикселей пользователь уже проскроллил:
-  const scrolled = window.scrollY;
-
-  // Обозначим порог, по приближении к которому
-  // будем вызывать какое-то действие.
-  // В нашем случае — четверть экрана до конца страницы:
-  const threshold = height - screenHeight / 4;
-
-  // Отслеживаем, где находится низ экрана относительно страницы:
-  const position = scrolled + screenHeight;
-
-  if (position >= threshold && query) {
-    // Если мы пересекли полосу-порог, вызываем нужное действие.
-    getData(query, nextPage);
-  }
-}
-
-function throttle(callee, timeout) {
-  let timer = null;
-
-  return function perform(...args) {
-    if (timer) return;
-
-    timer = setTimeout(() => {
-      callee(...args);
-
-      clearTimeout(timer);
-      timer = null;
-    }, timeout);
-  };
-}
-
-(() => {
-  window.addEventListener('scroll', throttle(checkPosition, 250));
-  window.addEventListener('resize', throttle(checkPosition, 250));
-})();
 
 form.addEventListener('submit', onSubmitForm);
